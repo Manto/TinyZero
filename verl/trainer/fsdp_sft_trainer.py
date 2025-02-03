@@ -151,7 +151,7 @@ class FSDPSFTTrainer(object):
 
         trust_remote_code = self.config.model.trust_remote_code
         # load config first
-        config = AutoConfig.from_pretrained(local_model_path, trust_remote_code=trust_remote_code)
+        config = AutoConfig.from_pretrained(local_model_path, torch_dtype="auto", trust_remote_code=trust_remote_code)
 
         # This may be very large
         init_context = get_init_weight_context_manager(use_meta_tensor=not config.tie_word_embeddings)
@@ -159,7 +159,8 @@ class FSDPSFTTrainer(object):
         with init_context():
             self.model: PreTrainedModel = AutoModelForCausalLM.from_pretrained(local_model_path,
                                                                                config=config,
-                                                                               torch_dtype=torch.float32,
+                                                                            #    torch_dtype=torch.float32,
+                                                                                torch_dtype="auto",
                                                                                attn_implementation='flash_attention_2',
                                                                                trust_remote_code=trust_remote_code)
 

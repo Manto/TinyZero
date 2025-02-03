@@ -49,7 +49,7 @@ def get_huggingface_actor_config(model_name: str, override_config_kwargs=None, t
         override_config_kwargs = {}
     assert isinstance(override_config_kwargs, Dict), \
         f'override_config_kwargs must be a dict, got {type(override_config_kwargs)}'
-    module_config = AutoConfig.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+    module_config = AutoConfig.from_pretrained(model_name, torch_dtype="auto", trust_remote_code=trust_remote_code)
     update_model_config(module_config, override_config_kwargs)
 
     return module_config
@@ -271,7 +271,7 @@ def load_megatron_model_weights(config,
 
     # TODO: to find a better way to load mistral7b-rm lm_head
     if 'mistral7b-rm' in config.model.path:
-        model = MistralForSequenceClassification.from_pretrained(local_model_path)  # use score head instead of lm_head
+        model = MistralForSequenceClassification.from_pretrained(local_model_path, torch_dtype="auto")  # use score head instead of lm_head
         state_dict = model.state_dict()
         state_dict['lm_head.weight'] = state_dict['score.weight']
         state_dict['model.embed_tokens.weight'] = state_dict[
@@ -280,7 +280,7 @@ def load_megatron_model_weights(config,
     else:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-        model = AutoModelForCausalLM.from_pretrained(local_model_path)
+        model = AutoModelForCausalLM.from_pretrained(local_model_path, torch_dtype="auto")
         state_dict = model.state_dict()
 
     from verl.models.weight_loader_registry import get_weight_loader
