@@ -5,6 +5,7 @@ datasets
 dill
 flash-attn
 hydra-core
+lighteval
 numpy
 pandas
 pybind11
