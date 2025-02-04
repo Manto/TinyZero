@@ -1,43 +1,68 @@
-import lighteval as le
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from datasets import load_dataset
+import lighteval
+import argparse
+from lighteval.logging.evaluation_tracker import EvaluationTracker
+from lighteval.pipeline import ParallelismManager, Pipeline, PipelineParameters
+from lighteval.utils.utils import EnvConfig
+from lighteval.utils.imports import is_accelerate_available
+from datetime import timedelta
 
-# Load a base LLM (not instruct-tuned)
-model_name = "EleutherAI/gpt-neo-1.3B"  # Replace with your preferred base model
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForCausalLM.from_pretrained(model_name)
+if is_accelerate_available():
+    from accelerate import Accelerator, InitProcessGroupKwargs
+    accelerator = Accelerator(kwargs_handlers=[InitProcessGroupKwargs(timeout=timedelta(seconds=3000))])
+else:
+    accelerator = None
 
-# Load the AIME_2024 dataset from Hugging Face
-dataset = load_dataset("Maxwell-Jia/AIME_2024", split="test")
+def main(engine, model, is_instruct):
+    print(f"Running evaluation with {engine} engine, model: {model}, is_instruct: {is_instruct}")
+    evaluation_tracker = EvaluationTracker(
+        output_dir="./results",
+        save_details=True,
+        push_to_hub=True,
+        hub_results_org="mantle0",
+    )
 
-# Define a math evaluation task
-class AIME2024Task(le.Task):
-    def __init__(self):
-        super().__init__(name="AIME_2024_math")
+    pipeline_params = PipelineParameters(
+        launcher_type=ParallelismManager.ACCELERATE,
+        env_config=EnvConfig(cache_dir="tmp/"),
+        # Remove the 2 parameters below once your configuration is tested
+        override_batch_size=1,
+        max_samples=10
+    )
 
-    def dataset(self):
-        return [{"input": sample["problem"], "expected": str(sample["answer"])} for sample in dataset]
 
-    def evaluate(self, sample, model_output):
-        return sample["expected"].strip() == model_output.strip()
+    if engine == 'vllm':
+        from lighteval.models.vllm.vllm_model import VLLMModelConfig
+        model_config = VLLMModelConfig(
+            pretrained=model,
+            dtype="float16",
+            use_chat_template=not is_instruct,
+        )
+    elif engine == 'transformers':
+        from lighteval.models.transformers.transformers_model import TransformersModelConfig
+        model_config = TransformersModelConfig(
+                pretrained=model,
+                dtype="float16",
+                use_chat_template=not is_instruct,
+        )
 
-# Define a basic wrapper for non-instruct-tuned models
-class BaseLLMEvaluator(le.Model):
-    def __init__(self, model, tokenizer):
-        super().__init__(name="base_llm")
-        self.model = model
-        self.tokenizer = tokenizer
+    task = "lighteval|gpqa|0|0"
 
-    def generate(self, prompt):
-        input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
-        output_ids = self.model.generate(input_ids, max_length=50)
-        response = self.tokenizer.decode(output_ids[0], skip_special_tokens=True)
-        return response[len(prompt):].strip()  # Extract generated text after prompt
+    pipeline = Pipeline(
+        tasks=task,
+        pipeline_parameters=pipeline_params,
+        evaluation_tracker=evaluation_tracker,
+        model_config=model_config,
+    )
 
-# Run the evaluation
-task = AIME2024Task()
-model = BaseLLMEvaluator(model, tokenizer)
-results = le.evaluate(model, [task])
+    pipeline.evaluate()
+    pipeline.save_and_push_results()
+    pipeline.show_results()
 
-# Print results
-print(results)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--engine', default='transformers', choices=['vllm', 'transformers'])
+    parser.add_argument('--is_instruct', action='store_true')
+    parser.add_argument('--model', type=str, default='Qwen/Qwen2.5-3B')
+
+    args = parser.parse_args()
+    main(args.engine, args.model, args.is_instruct)
